@@ -1,61 +1,90 @@
 # from pyvirtualdisplay import Display
+from selenium.common.exceptions import ElementNotInteractableException
+from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 from selenium import webdriver
 import time
 import sys
 from telegram import send_message, send_photo
-from creds import username, password, url_id
+from creds import username, password, url_id, country_code
+
+
+def log_in(driver):
+    # Checking if website is still logged
+    if driver.current_url == f'https://ais.usvisa-info.com/en-{country_code}/niv/users/sign_in':
+        print('Logging in.')
+        # Clicking the first prompt, if there is one
+        try:
+            driver.find_element(By.XPATH, '/html/body/div[6]/div[3]/div/button').click()
+        except Exception as e:
+            print(e)
+        # Filling the user and password
+        user_box = driver.find_element('name', 'user[email]')
+        user_box.send_keys(username)
+        password_box = driver.find_element('name', 'user[password]')
+        password_box.send_keys(password)
+        # Clicking the checkbox
+        driver.find_element(By.XPATH, '//*[@id="new_user"]/div[3]/label/div').click()
+        # Clicking 'Sign in'
+        driver.find_element(By.XPATH, '//*[@id="new_user"]/p[1]/input').click()
+        
+        # Waiting for the page to load.
+        # 5 seconds may be ok for a computer, but it doesn't seem enougn for the Raspberry Pi 4.
+        time.sleep(10)
+
+        # Logging to screen
+        print('Logged in.')
+    else:
+        print('Already logged.')
+        print(driver.current_url)
 
 
 def run_visa_scraper(url, no_appointment_text):
+    def click_ok_if_prompted():
+        if "You need to sign in or sign up before continuing." in str(driver.page_source):
+            driver.find_element(By.XPATH, '//button[text()="OK"]').click()
+
     def has_website_changed():
         '''Checks for changes in the site. Returns True if a change was found.'''
         # Getting the website to check
-        driver.get(url)
+        # driver.get(url)
 
-        # Checking if website is still logged
-        if driver.current_url == 'https://ais.usvisa-info.com/en-pe/niv/users/sign_in':
-            print('Logging in.')
-            # Clicking the first prompt, if there is one
+        # Log in
+        while True:
             try:
-                driver.find_element_by_xpath(
-                    '/html/body/div[6]/div[3]/div/button').click()
-            except:
-                pass
-            # Filling the user and password
-            user_box = driver.find_element_by_name('user[email]')
-            user_box.send_keys(username)
-            password_box = driver.find_element_by_name('user[password]')
-            password_box.send_keys(password)
-            # Clicking the checkbox
-            driver.find_element_by_xpath(
-                '//*[@id="new_user"]/div[3]/label/div').click()
-            # Clicking 'Sign in'
-            driver.find_element_by_xpath(
-                '//*[@id="new_user"]/p[1]/input').click()
+                driver.get(url)
+                # click_ok_if_prompted()
+                log_in(driver)
+                break
+            except ElementNotInteractableException:
+                time.sleep(5)
+
+        while True:
+            # Getting the website to check again
+            # in case it was redirected to another website and
+            # avoid using a timer for waiting for the login redirect. DIDN'T WORK
+            driver.get(url)
+
+            print('Checking for changes.')
+            time.sleep(3)
+
+            if "You do not have permission to access that account." in driver.page_source:
+                print("On wrong page.")
+                continue
+
+            if "429 Too Many Requests" in driver.page_source:
+                print("429 Too Many Requests.")
+                continue
+
+            print("Page reached.")
+            break
             
-            # Waiting for the page to load.
-            # 5 seconds may be ok for a computer, but it doesn't seem enougn for the Raspberry Pi 4.
-            time.sleep(10)
-
-            # Logging to screen
-            print('Logged in.')
-        # else:
-        #     print('Already logged.')
-
-        # Getting the website to check again
-        # in case it was redirected to another website and
-        # avoid using a timer for waiting for the login redirect. DIDN'T WORK
-        driver.get(url)
-
-        print('Checking for changes.')
-        
         # # For debugging false positives.
-        # with open('debugging/page_source.html', 'w', encoding='utf-8') as f:
-        #     f.write(driver.page_source)
+        with open('debugging/page_source.html', 'w', encoding='utf-8') as f:
+            f.write(driver.page_source)
 
         # Getting main text
-        main_page = driver.find_element_by_id('main')
+        main_page = driver.find_element(By.ID, 'main')
 
         # For debugging false positives.
         with open('debugging/main_page', 'w') as f:
@@ -105,7 +134,7 @@ def run_visa_scraper(url, no_appointment_text):
 
 
 def main():
-    base_url = f'https://ais.usvisa-info.com/en-pe/niv/schedule/{url_id}'
+    base_url = f'https://ais.usvisa-info.com/en-{country_code}/niv/schedule/{url_id}'
     
     # Checking for an appointment
     url = base_url + '/payment'
